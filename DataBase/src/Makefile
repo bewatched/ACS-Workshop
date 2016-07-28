@@ -185,7 +185,7 @@ ASCII_TO_MIF =
 #
 # other files to be installed
 #----------------------------
-INSTALL_FILES =
+INSTALL_FILES =../config/database.properties
 
 #
 # list of all possible C-sources (used to create automatic dependencies)
