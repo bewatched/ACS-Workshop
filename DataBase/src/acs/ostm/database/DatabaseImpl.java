@@ -9,17 +9,21 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import alma.ACS.ComponentStates;
+import alma.JavaContainerError.wrappers.AcsJContainerServicesEx;
 import alma.acs.component.ComponentLifecycle;
 import alma.acs.component.ComponentLifecycleException;
 import alma.acs.container.ContainerServices;
 import alma.maciErrType.wrappers.AcsJComponentCleanUpEx;
 import acsws.DATABASE_MODULE.*;
+import acsws.STORAGE_MODULE.*;
 import acsws.SYSTEMErr.ImageAlreadyStoredEx;
 import acsws.SYSTEMErr.InvalidProposalStatusTransitionEx;
 import acsws.SYSTEMErr.ProposalNotYetReadyEx;
@@ -32,11 +36,10 @@ public class DatabaseImpl implements ComponentLifecycle, DataBaseOperations {
 	private Logger m_logger;
 	private Properties props;
 	
-	private String dbFile = "database.properties";
-    private String url;
-    private String user;
-    private String passwd;
-
+	private ArrayList<Proposal> proposalList;
+	private HashMap<Integer, Proposal> proposalHashMap;
+	private int lastUsedPID = 0;
+	private HashMap<String, CachedImage> cachedImages;
 	
 	/////////////////////////////////////////////////////////////
 	// Implementation of ComponentLifecycle
@@ -48,67 +51,7 @@ public class DatabaseImpl implements ComponentLifecycle, DataBaseOperations {
 		m_logger = m_containerServices.getLogger();
 		m_logger.info("initialize() called...");
 		
-		// Find the database configuration file in the usual directories
-		FileInputStream in = null;
-		String pathToFile = ((String)File.separator) + "config" + ((String)File.separator) + "database.properties";
-		String fileFound = findFileInACS(pathToFile);
-		if (fileFound == null)
-			throw new ComponentLifecycleException("Could not find "+ pathToFile + " database configuration file.");
-		
-		// Open and parse the file
-        try {
-        	in = new FileInputStream(pathToFile);
-            props.load(in);
-        } catch (IOException ex) {
-        	m_logger.log(Level.SEVERE, ex.getMessage(), ex);
-        	throw new ComponentLifecycleException("Could not open " + pathToFile + " database configuration file. Please");
-        }finally {            
-            try {
-            	if (in != null)
-                     in.close();
-            } catch (IOException ex) {
-            	m_logger.log(Level.SEVERE, ex.getMessage(), ex);
-            }
-        }
-        url = props.getProperty("db.url");
-        user = props.getProperty("db.user");
-        passwd = props.getProperty("db.passwd");
-        m_logger.log(Level.INFO, "Opening connection to database using: user/passwd@url: " + user + "/" + passwd + "@" + url );
-        
-        
-        Connection con = null;
-        PreparedStatement pst = null;
-        ResultSet rs = null;
-
-        try {
-
-            con = DriverManager.getConnection(url, user, passwd);
-            pst = con.prepareStatement("SELECT VERSION()");
-            rs = pst.executeQuery();
-
-            while (rs.next()) {
-            	System.out.println(rs.getString(1));
-            }
-        } catch (Exception ex) {
-            m_logger.log(Level.SEVERE, ex.getMessage(), ex);
-        } finally {
-            try {
-                if (rs != null) {
-                    rs.close();
-                }
-                if (pst != null) {
-                    pst.close();
-                }
-                if (con != null) {
-                    con.close();
-                }
-            } catch (SQLException ex) {
-            	m_logger.log(Level.WARNING, ex.getMessage(), ex);
-            }
-        }
-
-        
-        
+		proposalList = new ArrayList<Proposal>();
 	}
 
 	@Override
@@ -154,89 +97,223 @@ public class DatabaseImpl implements ComponentLifecycle, DataBaseOperations {
 	public String name() {
 		return m_containerServices.getName();
 	}
-	
 
-	
 	/////////////////////////////////////////////////////////////
-	// Implementation of HelloDemoOperations
+	// Implementation of DataBaseOperations
 	/////////////////////////////////////////////////////////////
 
 	@Override
 	public int storeProposal(Target[] targets) {
-		// TODO Auto-generated method stub
-		return 0;
+		// Preparation of new proposal
+		Proposal newProposal = new Proposal();
+		newProposal.pid = this.lastUsedPID + 1;
+		newProposal.status = 0; // 0 = Queued
+		newProposal.targets = targets;
+		
+		// Addition of the new proposal to in memory proposal list
+		this.proposalHashMap.put(newProposal.pid, newProposal);
+		
+		// Add 1 to the current pid
+		this.lastUsedPID = newProposal.pid;
+		
+		return this.lastUsedPID;
 	}
 
 	@Override
 	public int getProposalStatus(int pid) {
-		// TODO Auto-generated method stub
-		return 0;
-	}
-
-	@Override
-	public void removeProposal(int pid) {
-		// TODO Auto-generated method stub
+		if( proposalHashMap.containsKey( pid ) ){
+			Proposal temp = proposalHashMap.get(pid);
+			return temp.status;
+		}else{
+			// TODO: Log warning
+			return -1; // -1 for error, as valid results starts from 0
+		}
 		
 	}
 
 	@Override
-	public int[][] getProposalObservations(int pid) throws ProposalNotYetReadyEx {
+	public void removeProposal(int pid) {
+		if( proposalHashMap.containsKey( pid ) ){
+			proposalHashMap.remove(pid);
+		}else{
+			// TODO: Log warning
+		}		
+	}
+
+	@Override
+	public byte[][] getProposalObservations(int pid) throws ProposalNotYetReadyEx {
 		// TODO Auto-generated method stub
 		return null;
 	}
 
 	@Override
 	public Proposal[] getProposals() {
-		// TODO Auto-generated method stub
-		return null;
+		Proposal[] proposals;
+		Collection<Proposal> proposalsValues = proposalHashMap.values();
+		proposals = new Proposal[proposalsValues.size()];
+		
+		int i = 0;
+		for( Proposal prop : proposalHashMap.values() ){
+			proposals[i] = prop;
+			i++;
+		}
+		return proposals;
 	}
 
 	@Override
 	public void setProposalStatus(int pid, int status) throws InvalidProposalStatusTransitionEx {
-		// TODO Auto-generated method stub
+		if( status < 0 && status > 2 ){ // Not a valid status value
+			// TODO: Log exception and its cause
+			InvalidProposalStatusTransitionEx ex = new InvalidProposalStatusTransitionEx();
+			throw ex;
+		}		
+		if( proposalHashMap.containsKey( pid ) ){
+			if( proposalHashMap.get(pid).status == 0 && status == 1 ){
+				proposalHashMap.get(pid).status = status;
+			}else if ( proposalHashMap.get(pid).status == 1 && status == 2 ){
+				proposalHashMap.get(pid).status = status;
+			}else if ( proposalHashMap.get(pid).status == 2 && status == 0 ){
+				proposalHashMap.get(pid).status = status;
+			}else{
+				// TODO: Log erroneous transition
+				InvalidProposalStatusTransitionEx ex = new InvalidProposalStatusTransitionEx();
+				throw ex;
+			}
+		}else{
+			// TODO: Log warning
+		}	
 		
 	}
 
 	@Override
-	public void storeImage(int pid, int tid, int[] image) throws ImageAlreadyStoredEx {
-		// TODO Auto-generated method stub
+	public void storeImage(int pid, int tid, byte[] image) throws ImageAlreadyStoredEx {
+		Storage m_storageComponent = null;
+		try {
+			m_storageComponent = StorageHelper.narrow(
+					this.m_containerServices.getComponent("STORAGE") );
+		} catch (AcsJContainerServicesEx e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		if( proposalHashMap.containsKey( pid ) ){ // Find the proposal
+			Proposal prop = proposalHashMap.get(pid);
+			boolean targetFound = false;
+			for( Target target : prop.targets ){ // Find the target in the proposal
+				if( target.tid == tid ) targetFound = true;
+			}
+			if( targetFound ){
+				if( cacheImageInMemory(pid, tid, image) < 0 ){
+					// TODO: Log failure
+					throw new ImageAlreadyStoredEx();
+				}else{
+					// TODO: Log success in caching image
+					if( isEveryImageCached(pid) ){
+						// initiate storage of images into database
+						m_storageComponent.storeObservation( prop, allImages(pid) );
+						removeImages(pid);
+					}
+				}
+			}else{
+				// TODO: Fail and Log warning
+			}
+		}else{
+			// TODO: Fail and Log warning
+			return;
+		}		
 		
 	}
-
-
+	
 	/////////////////////////////////////////////////////////////
 	// Auxiliary methods
 	/////////////////////////////////////////////////////////////
 	
-	String findFileInACS(String pathToFile){
-	
-	    List<String> dirs = new ArrayList<String>();
-	    String introot = System.getenv("INTROOT");
-	    if (introot != null) {
-	        dirs.add(introot);
-	    }
-	    String intlist = System.getenv("INTLIST");
-	    if (intlist != null) {
-	        String[] intlistDirs = intlist.split(":");
-	        for (String d : intlistDirs) {
-	            dirs.add(d);
-	        }
-	    }
-	    String acsroot = System.getenv("ACSROOT");
-	    if (acsroot != null) {
-	        dirs.add(acsroot);
-	    }
-	
-	    for (String dir : dirs) {
-	        String cf = dir + pathToFile;
-	        File f = new File(cf);
-	        if (f.exists() && !f.isDirectory() ) {
-	            return cf;
-	        }
-	    }
-	    
-	    return null;
+	private byte[][] allImages(int pid){
+		Proposal prop = proposalHashMap.get(pid);
+		byte[][] images = new byte[prop.targets.length][];
+		int i = 0;
+		for( Target targ : prop.targets){
+			images[i] = cachedImages.get( generateId( pid, targ.tid)).image;
+			i++;
+		}
+		
+		return images;
 	}
 	
+	private void removeImages(int pid){
+		Proposal prop = proposalHashMap.get(pid);
+		for ( Target targ : prop.targets ){
+			if( cachedImages.containsKey( generateId(pid,targ.tid) ) ){
+				cachedImages.remove( generateId(pid,targ.tid) );
+			}
+		}
+	}
+	
+	private boolean isEveryImageCached(int pid){
+		Proposal prop = proposalHashMap.get(pid);
+		int imagesCachedSoFar = 0;
+		for ( Target targ : prop.targets){
+			if( cachedImages.containsKey( generateId(pid,targ.tid) ) ){
+				imagesCachedSoFar++;
+			}
+		}
+		if( imagesCachedSoFar == prop.targets.length ){
+			return true;
+		}else{
+			return false;
+		}
+	}
+	
+	private int cacheImageInMemory(int pid, int tid, byte[] image ){
+		if( cachedImages.containsKey( generateId(pid, tid) ) ){
+			return -1; // Cannot cache, as there is already an image
+		}else{
+			CachedImage newCachedImage = new CachedImage(pid, tid, image);
+			cachedImages.put( generateId(pid, tid), newCachedImage);
+			return 0; // Success in cache
+		}		
+		
+	}
+	
+	public static String generateId(int pid, int tid){
+		return Integer.toString(pid) + "," + Integer.toString(tid);
+	}
+	
+	private class CachedImage{
+		private int pid;
+		private int tid;
+		private boolean stored;
+		private byte[] image;
+		
+		public CachedImage(int pid, int tid, byte[] image ){
+			this.pid = pid;
+			this.tid = tid;
+			this.stored = false;
+			this.image = image;
+		}
+		
+		public String getId(){
+			return generateId(this.pid, this.tid);
+		}
+		
+		
+		public int getPid(){
+			return this.pid;
+		}
+		
+		public int getTid(){
+			return this.tid;
+		}
+		
+		public boolean isStored(){
+			return stored;
+		}
+		
+		public void setStored(){
+			this.stored = true;
+		}
+		
+		
+	}
 
 }
