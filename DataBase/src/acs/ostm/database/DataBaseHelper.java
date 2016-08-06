@@ -14,7 +14,7 @@ public class DataBaseHelper extends ComponentHelper
 	}
 	protected ComponentLifecycle _createComponentImpl()
 	{
-		return new DatabaseImpl();
+		return new DataBaseImpl();
 	}
 
 	protected Class _getPOATieClass()
