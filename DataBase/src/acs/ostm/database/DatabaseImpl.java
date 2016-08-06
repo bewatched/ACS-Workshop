@@ -49,7 +49,7 @@ public class DatabaseImpl implements ComponentLifecycle, DataBaseOperations {
 	public void initialize(ContainerServices containerServices) throws ComponentLifecycleException {
 		m_containerServices = containerServices;
 		m_logger = m_containerServices.getLogger();
-		m_logger.info("initialize() called...");
+		m_logger.finest("initialize() called.");
 		
 		proposalList = new ArrayList<Proposal>();
 	}
@@ -171,8 +171,6 @@ public class DatabaseImpl implements ComponentLifecycle, DataBaseOperations {
 			if( proposalHashMap.get(pid).status == 0 && status == 1 ){
 				proposalHashMap.get(pid).status = status;
 			}else if ( proposalHashMap.get(pid).status == 1 && status == 2 ){
-				proposalHashMap.get(pid).status = status;
-			}else if ( proposalHashMap.get(pid).status == 2 && status == 0 ){
 				proposalHashMap.get(pid).status = status;
 			}else{
 				// TODO: Log erroneous transition
