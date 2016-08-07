@@ -4,7 +4,7 @@
 	xmlns:baci="urn:schemas-cosylab-com:BACI:1.0" 
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<_ Name="DataBase" 	    
-		Code="acsws.DATABASE_MODULE.DataBaseHelper" 
-		Type="IDL:acsws/DATABASE_MODULE/DataBaseHelper:1.0"
+		Code="acs.ostm.database.DataBaseHelper" 
+		Type="IDL:acsws/DATABASE_MODULE/DataBase:1.0"
 		Container="javaToyContainer" ImplLang="java" />
 </Components>
